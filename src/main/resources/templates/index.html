@@ -1,0 +1,67 @@
+<!DOCTYPE HTML>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Getting Started: Serving Web Content</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"
+          integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous"/>
+</head>
+<body>
+<div class="row">
+    <div class="col-md-9 col-md-offset-1">
+        <table class="table">
+            <caption>Articles</caption>
+            <thead>
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Image</th>
+                <th>Description</th>
+                <th>Price</th>
+            </tr>
+            </thead>
+            <tbody>
+            <tr th:each="article : ${articles}">
+                <th th:text="${article.id}"></th>
+                <td th:text="${article.name}"></td>
+                <td th:text="${article.image}"></td>
+                <td th:text="${article.description}"></td>
+                <td th:text="${article.price}"></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+<hr/>
+<br/>
+<div class="row">
+    <div class="col-md-3 col-md-offset-1">
+        <h2>New Article</h2>
+        <form action="#" th:action="@{/}" th:object="${article}" method="post">
+            <div class="form-group">
+                <label for="name">Name</label>
+                <input type="text" class="form-control" id="name" th:field="*{name}"/>
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <input type="text" class="form-control" id="description" th:field="*{description}"/>
+            </div>
+            <div class="form-group">
+                <label for="image">Image</label>
+                <input type="text" class="form-control" id="image" th:field="*{image}"/>
+            </div>
+            <div class="form-group">
+                <label for="price">Price</label>
+                <input type="text" class="form-control" id="price" th:field="*{price}"/>
+            </div>
+            <button type="submit" class="btn btn-default">Add</button>
+        </form>
+
+    </div>
+</div>
+
+
+</body>
+</html>
+
