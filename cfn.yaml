@@ -1,0 +1,295 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'The AWS stack for Article App'
+Parameters:
+  SoftwareVersion:
+    Type: String
+    Description: 'The software version'
+Resources:
+  VPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: CostObject
+          Value: ArticleApp
+  SubnetA:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Join [ "", [!Ref 'AWS::Region', a]]
+      CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ArticleAppA
+        - Key: CostObject
+          Value: ArticleApp
+  SubnetB:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Join [ "", [!Ref 'AWS::Region', b]]
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ArticleAppB
+        - Key: CostObject
+          Value: ArticleApp
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ArticleAppIGW
+        - Key: CostObject
+          Value: ArticleApp
+  GatewayToInternet:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ArticleApp-Routing
+        - Key: CostObject
+          Value: ArticleApp
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: GatewayToInternet
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  SubnetARouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref PublicRouteTable
+  SubnetBRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref PublicRouteTable
+  ELBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security group for load balancer'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub |
+              ArticleApp-Routing
+        - Key: CostObject
+          Value: TodoApp
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+  ServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security group for servers'
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub |
+              ArticleApp-Routing
+        - Key: CostObject
+          Value: ArticleApp
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8080'
+          ToPort: '8080'
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+  CloudWatchLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: articles
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: ArticleAppInstancePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:GetRepositoryPolicy'
+                  - 'ecr:DescribeRepositories'
+                  - 'ecr:ListImages'
+                  - 'ecr:BatchGetImage'
+                Resource: '*'
+                Effect: Allow
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:*'
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/articles
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/articles/index/*
+              - Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Effect: Allow
+                Resource: !GetAtt [CloudWatchLogGroup, Arn]
+              - Action:
+                  - 'cloudformation:SignalResource'
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+  IAMInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref IAMRole
+  ExternalELB:
+    Type: 'AWS::ElasticLoadBalancing::LoadBalancer'
+    Properties:
+      CrossZone: true
+      Listeners:
+        - LoadBalancerPort: '80'
+          InstancePort: '8080'
+          InstanceProtocol: HTTP
+          Protocol: HTTP
+      HealthCheck:
+        Target: 'HTTP:8080/health'
+        HealthyThreshold: '2'
+        UnhealthyThreshold: '2'
+        Interval: '6'
+        Timeout: '5'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      Tags:
+        - Key: CostObject
+          Value: ArticleApp
+  LaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:
+      AssociatePublicIpAddress: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            VolumeType: gp2
+            VolumeSize: '8'
+      EbsOptimized: false
+      InstanceMonitoring: false
+      IamInstanceProfile: !Ref IAMInstanceProfile
+      ImageId: ami-c90bf8a6
+      InstanceType: t2.nano
+      SecurityGroups:
+        - !Ref ServerSecurityGroup
+      UserData:
+        'Fn::Base64': !Sub
+          - |
+            #cloud-config
+            ssh_authorized_keys:
+              - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDw7ifk0cFD7rvJeXAwRjSXFhOz4i1GJt0SMwUlDZuSgokGb9aI6pea4UqtWfadlk57Rwlrr3xLFwAJxYBiSgpUSJBfaaeDEJOo4NS1dpXl1OpV/be8daKUgWIyn/oqSxfQCII7HCZyEnakefKm+wlFgWoAv+WujVgTtBwL76+ed1Rt/643Hoek2/6vpI9d6T+HaEtVCT6TDQOqJu1vidvK6s7zLoETRI6j8k269tNxVr5zw2tpHQHN6xD7T3lV05roXR5qwtJsM+yO9L5q37Mht+y5olCb1jeHyxeGcPEeIHe/6DeVFUa7Pa2ErStUE73Gi5DOnIWcgkerpkNixq5h tf.pack@googlemail.com"
+            coreos:
+              units:
+                - name: update-engine.service
+                  command: stop
+                - name: locksmithd.service
+                  command: stop
+                - name: "article.service"
+                  command: "start"
+                  content: |
+                    [Unit]
+                    Description=Article App
+                    After=docker.service
+
+                    [Service]
+                    Restart=always
+                    Environment=IMAGE=${AWS::AccountId}.dkr.ecr.eu-central-1.amazonaws.com/article-app:${DockerTag}
+                    ExecStartPre=-/usr/bin/docker kill article
+                    ExecStartPre=-/usr/bin/docker rm article
+                    ExecStartPre=/bin/bash -c 'eval $(docker run --rm -e AWS_DEFAULT_REGION=eu-central-1 crewjam/awscli:latest aws ecr get-login --region eu-central-1)'
+                    ExecStartPre=-/usr/bin/docker pull ${!IMAGE}
+                    ExecStop=/usr/bin/docker stop -t 2 article
+                    ExecStartPost=-/usr/bin/docker run --rm crewjam/awscli:latest cfn-signal \
+                              -e 0 --stack ${AWS::StackName} --resource AutoScalingGroup --region eu-central-1
+                    ExecStart=/usr/bin/docker run --restart=always \
+                              -p 8080:8080 --name article \
+                              --log-driver awslogs --log-opt awslogs-region=${AWS::Region} --log-opt awslogs-group=${CloudWatchLogGroup} \
+                              ${!IMAGE}
+          - DockerTag: !Ref SoftwareVersion
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      LoadBalancerNames:
+        - !Ref ExternalELB
+      DesiredCapacity: '2'
+      HealthCheckGracePeriod: 300
+      HealthCheckType: ELB
+      LaunchConfigurationName: !Ref LaunchConfig
+      MaxSize: '2'
+      MinSize: '1'
+      Tags:
+        - Key: CostObject
+          Value: ArticleApp
+          PropagateAtLaunch: 'true'
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+        - !Ref SubnetB
+    UpdatePolicy:
+      AutoScalingScheduledAction:
+        IgnoreUnmodifiedGroupSizeProperties: 'true'
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        WaitOnResourceSignals: 'true'
+        PauseTime: PT10M
+Outputs:
+  LoadBalancer:
+    Description: 'The ELB address'
+    Value: !GetAtt [ExternalELB, DNSName]
